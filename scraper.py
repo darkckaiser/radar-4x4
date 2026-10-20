@@ -99,8 +99,13 @@ def telegram(msg):
     if not (tok and chat):
         print("Telegram sin configurar:", msg[:80])
         return
-    requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
-                  data={"chat_id": chat, "text": msg, "disable_web_page_preview": "false"}, timeout=20)
+    try:
+        r = requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
+                          data={"chat_id": chat, "text": msg}, timeout=20)
+        if r.status_code != 200:
+            print("Telegram devolvió", r.status_code, r.text[:200])
+    except Exception as e:
+        print("Telegram falló:", e)
 
 
 def formato(a):
@@ -140,6 +145,7 @@ def main():
     limite = (ahora - timedelta(days=10)).isoformat()
     lista = [a for a in conocidos.values() if a["ultima_vez"] >= limite]
     lista.sort(key=lambda a: (a.get("dist_km") is None, a.get("dist_km") or 0))
+    os.makedirs("data", exist_ok=True)
     json.dump({"actualizado": ahora.isoformat(), "listings": lista},
               open(DATA, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"{len(lista)} anuncios, {len(nuevos)} nuevos")
