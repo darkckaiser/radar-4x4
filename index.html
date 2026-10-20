@@ -65,11 +65,12 @@ article.nuevo{border-left:4px solid var(--barro)}
       <label>Marca<select id="marca"></select></label>
       <label>Modelo<select id="modelo"></select></label>
       <label>Web<select id="fuente"></select></label>
-      <label>Km máximos<input id="kmMax" type="number" inputmode="numeric" min="0" step="10000" placeholder="200000"></label>
+      <label>Provincia<select id="provincia"></select></label>
       <label>Año desde<input id="anioMin" type="number" inputmode="numeric" placeholder="1995"></label>
       <label>Año hasta<input id="anioMax" type="number" inputmode="numeric" placeholder="2010"></label>
       <label>Potencia mínima (CV)<input id="cvMin" type="number" inputmode="numeric" min="0" placeholder="100"></label>
       <label>Potencia máxima (CV)<input id="cvMax" type="number" inputmode="numeric" min="0" placeholder="200"></label>
+      <label class="ancho">Km máximos<input id="kmMax" type="number" inputmode="numeric" min="0" step="10000" placeholder="200000"></label>
       <label class="ancho check"><input id="sinDato" type="checkbox" checked> Incluir anuncios que no indican ese dato</label>
     </div>
   </details>
@@ -100,7 +101,7 @@ const guardar=()=>{try{localStorage.setItem(KEY,JSON.stringify(estados))}catch(e
 const estado=a=>estados[a.id]||"nuevos";
 const fechaPub=a=>a.fecha_pub||a.primera_vez;
 const reciente=a=>{const f=fechaPub(a);return !f||(Date.now()-new Date(f))/864e5<=DIAS};
-const IDS=["q","marca","modelo","fuente","kmMax","anioMin","anioMax","cvMin","cvMax"];
+const IDS=["q","marca","modelo","fuente","provincia","kmMax","anioMin","anioMax","cvMin","cvMax"];
 
 async function cargar(){
   try{const r=await fetch("data/listings.json?"+Date.now(),{cache:"no-store"});datos=await r.json();}
@@ -117,6 +118,7 @@ function poblar(){
   const uniq=f=>[...new Set(l.map(f).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"es"));
   opciones($("#marca"),uniq(a=>a.marca),"Todas");
   opciones($("#fuente"),uniq(a=>a.fuente),"Todas");
+  opciones($("#provincia"),uniq(a=>a.provincia),"Todas");
   const m=$("#marca").value;
   opciones($("#modelo"),[...new Set(l.filter(a=>!m||a.marca===m).map(a=>a.modelo).filter(Boolean))].sort(),"Todos");
 }
@@ -124,11 +126,12 @@ function filtros(){
   const f={};IDS.forEach(i=>f[i]=$("#"+i).value.trim());f.sinDato=$("#sinDato").checked;return f;
 }
 function pasa(a,f){
-  if(f.q&&!(()=>{const t=sin([a.titulo,a.descripcion,a.ciudad,a.marca,a.modelo,a.fuente].join(" "));
+  if(f.q&&!(()=>{const t=sin([a.titulo,a.descripcion,a.ciudad,a.provincia,a.marca,a.modelo,a.fuente].join(" "));
     return sin(f.q).split(/\s+/).every(w=>t.includes(w))})())return false;
   if(f.marca&&a.marca!==f.marca)return false;
   if(f.modelo&&a.modelo!==f.modelo)return false;
   if(f.fuente&&a.fuente!==f.fuente)return false;
+  if(f.provincia&&(a.provincia?a.provincia!==f.provincia:!f.sinDato))return false;
   const ok=(v,fn)=>v==null?f.sinDato:fn(+v);
   if(f.kmMax&&!ok(a.km,v=>v<=+f.kmMax))return false;
   if(f.anioMin&&!ok(a.anio,v=>v>=+f.anioMin))return false;
@@ -165,7 +168,7 @@ function pintar(){
       <div class="cuerpo"><div class="t">${esc(a.titulo)}</div>
       <div class="p">${Math.round(a.precio).toLocaleString("es-ES")} €</div>
       <div class="m">${datosVeh}</div>
-      <div class="m">${esc(a.ciudad)}${d}</div>
+      <div class="m">${esc([a.ciudad,a.provincia&&a.provincia!==a.ciudad?a.provincia:""].filter(Boolean).join(", "))}${d}</div>
       <div class="m">${esc(a.fuente)} · publicado ${hace(fechaPub(a))}</div>
       <div class="acc"><a href="${esc(a.url)}" target="_blank" rel="noopener">Ver anuncio</a>
       ${tab!=="interesa"?`<button class="si" data-id="${esc(a.id)}" data-e="interesa">Me interesa</button>`:""}
