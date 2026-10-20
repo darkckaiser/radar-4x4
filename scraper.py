@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 import requests
 
 # ---------- AJUSTES (edita aquí) ----------
-MAX_PRECIO = 100000        # tope de cordura (descarta precios absurdos)
+MAX_PRECIO = 300000        # solo descarta precios absurdos (p. ej. 99999999 = 'consultar')
 TRAMOS = [(0, 2500), (2500, 5000), (5000, 10000), (10000, None)]   # se consulta cada tramo por separado
 MIN_PRECIO = 800          # descarta piezas, señales y anuncios trampa
 MAX_KM = 200000
@@ -16,6 +16,9 @@ MODELOS = [
     "mitsubishi montero", "mitsubishi pajero", "santana aníbal", "santana 300",
     "jeep wrangler", "jeep cherokee", "isuzu trooper", "daihatsu feroza",
     "nissan terrano", "lada niva", "uaz", "range rover clasico", "toyota fj",
+    "toyota hilux", "toyota prado", "toyota 4runner", "mercedes clase g", "nissan navara",
+    "nissan pathfinder", "mitsubishi l200", "ford ranger", "isuzu d-max", "suzuki grand vitara",
+    "jeep grand cherokee", "land rover freelander", "hummer", "ssangyong rexton",
 ]
 EXCLUIR = ["recambio", "despiece", "piezas", "juguete", "maqueta", "escala 1",
            "para piezas", "sin motor", "accidentado", "averiado", "se compra", "compro"]
@@ -42,7 +45,13 @@ def extraer_km(texto):
 
 
 IDENT = [  # patrón en el título -> (marca, modelo); el orden importa
-    (r"land.?cruiser|\bhdj|\bkzj|\bkdj|toyota fj", "Toyota", "Land Cruiser"),
+    (r"land.?cruiser|\bhdj|\bkzj|\bkdj|toyota fj|\bprado\b", "Toyota", "Land Cruiser"),
+    (r"hilux", "Toyota", "Hilux"), (r"4 ?runner", "Toyota", "4Runner"),
+    (r"clase g\b|g-?wagen|g-?class|\bg ?(?:270|290|300|320|350|400|500)\b", "Mercedes-Benz", "Clase G"),
+    (r"navara", "Nissan", "Navara"), (r"pathfinder", "Nissan", "Pathfinder"),
+    (r"\bl-?200\b", "Mitsubishi", "L200"), (r"\branger\b", "Ford", "Ranger"), (r"d-?max", "Isuzu", "D-Max"),
+    (r"grand vitara", "Suzuki", "Grand Vitara"), (r"grand cherokee", "Jeep", "Grand Cherokee"),
+    (r"freelander", "Land Rover", "Freelander"), (r"hummer", "Hummer", "Hummer"), (r"rexton", "SsangYong", "Rexton"),
     (r"patrol", "Nissan", "Patrol"), (r"terrano", "Nissan", "Terrano"),
     (r"vitara", "Suzuki", "Vitara"), (r"jimny", "Suzuki", "Jimny"), (r"samurai", "Suzuki", "Samurai"),
     (r"defender", "Land Rover", "Defender"), (r"discovery", "Land Rover", "Discovery"),
@@ -236,7 +245,8 @@ def numero(x):
     return float(m.group(0).replace(".", "")) if m else None
 
 
-AS24_MODELOS = ["toyota/land-cruiser", "nissan/patrol", "nissan/terrano", "suzuki/vitara", "suzuki/jimny",
+AS24_MODELOS = ["toyota/hilux", "nissan/navara", "mitsubishi/l200", "ford/ranger", "isuzu/d-max",
+                "suzuki/grand-vitara", "jeep/grand-cherokee", "land-rover/freelander", "toyota/land-cruiser", "nissan/patrol", "nissan/terrano", "suzuki/vitara", "suzuki/jimny",
                 "suzuki/samurai", "land-rover/defender", "land-rover/discovery", "land-rover/range-rover",
                 "mitsubishi/montero", "mitsubishi/pajero", "jeep/wrangler", "jeep/cherokee", "isuzu/trooper",
                 "daihatsu/feroza", "lada/niva"]
@@ -252,7 +262,7 @@ def autoscout24():
             print(f"[AutoScout24] {ruta}: {e}")
         time.sleep(1.5)
     if not ok:   # si las páginas por modelo no responden, se recorren los últimos anuncios baratos en general
-        out = _as24("https://www.autoscout24.es/lst", {"priceto": 10000, "sort": "age", "desc": 1}, 5)
+        out = _as24("https://www.autoscout24.es/lst", {"sort": "age", "desc": 1}, 5)
     return out
 
 
@@ -309,7 +319,7 @@ def cochesnet(paginas=3):
     out = []
     for p in range(1, paginas + 1):
         r = requests.get("https://www.coches.net/segunda-mano/", headers=HTML_H, timeout=30,
-                         params={"MaxPrice": 10000, "pg": p})
+                         params={"pg": p})
         r.raise_for_status()
         i = r.text.find("window.__INITIAL_PROPS__ = JSON.parse(")
         if i < 0:
@@ -350,11 +360,7 @@ def valido(a):
     texto = (a["titulo"] + " " + a["descripcion"]).lower()
     if any(x in texto for x in EXCLUIR):
         return False
-    t = a["titulo"].lower()
-    if a.get("_modelo"):
-        if a["_modelo"].split()[-1] not in t and a["_modelo"] not in texto:
-            return False
-    elif not any(re.search(p, t) for p in PATRONES):
+    if not identificar(a["titulo"])[0]:
         return False
     if not a.get("km"):
         a["km"] = extraer_km(texto)
@@ -399,7 +405,13 @@ def main():
     except Exception:
         prev = {"listings": []}
     conocidos = {a["id"]: a for a in prev["listings"]}
-    previas = {a["fuente"] for a in prev["listings"]}
+    def tramo_de(p):
+        return next((i for i, (lo, hi) in enumerate(TRAMOS) if p >= lo and (hi is None or p < hi)), 0)
+
+    def clave(a):
+        return (a["fuente"], tramo_de(a["precio"]))
+
+    previas = {clave(a) for a in prev["listings"]}
     nuevos = []
 
     stats = {}
@@ -446,13 +458,18 @@ def main():
 
     cerca = lambda a: (a.get("dist_km") is None, a.get("dist_km") or 0)
     nuevos.sort(key=cerca)
-    for f in sorted({a["fuente"] for a in nuevos} - previas):   # fuente recién añadida: resumen, sin inundar
-        n = [a for a in nuevos if a["fuente"] == f]
-        telegram(f"✅ {f} añadido: {len(n)} anuncios guardados. Te muestro los 3 más cercanos; "
+    def etiqueta_tramo(k):
+        lo, hi = TRAMOS[k[1]]
+        rango = f"< {hi:,}".replace(",", ".") if lo == 0 else (f"> {lo:,}".replace(",", ".") if hi is None else f"{lo:,}–{hi:,}".replace(",", "."))
+        return f"{k[0]} ({rango} €)"
+
+    for k in sorted({clave(a) for a in nuevos} - previas):   # combinación portal+precio vista por primera vez: resumen
+        n = [a for a in nuevos if clave(a) == k]
+        telegram(f"✅ {etiqueta_tramo(k)}: {len(n)} anuncios guardados. Te muestro los 3 más cercanos; "
                  "a partir de ahora solo aviso de los nuevos.")
         for a in n[:3]:
             telegram(formato(a))
-    avisar = [a for a in nuevos if a["fuente"] in previas]
+    avisar = [a for a in nuevos if clave(a) in previas]
     for a in avisar[:12]:
         telegram(formato(a))
     if len(avisar) > 12:
