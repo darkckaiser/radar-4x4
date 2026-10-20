@@ -4,7 +4,8 @@ from datetime import datetime, timezone, timedelta
 import requests
 
 # ---------- AJUSTES (edita aquí) ----------
-MAX_PRECIO = 5000
+MAX_PRECIO = 100000        # tope de cordura (descarta precios absurdos)
+TRAMOS = [(0, 2500), (2500, 5000), (5000, 10000), (10000, None)]   # se consulta cada tramo por separado
 MIN_PRECIO = 800          # descarta piezas, señales y anuncios trampa
 MAX_KM = 200000
 MAX_DIAS = 365            # se descartan anuncios publicados hace más de un año
@@ -99,10 +100,12 @@ def entero(x):
     return int(n) if n else None
 
 
-def wallapop(modelo):
+def wallapop(modelo, tramo=(None, None)):
     r = requests.get(
         "https://api.wallapop.com/api/v3/search",
-        params={"keywords": modelo, "category_id": "100", "max_sale_price": MAX_PRECIO,
+        params={"keywords": modelo, "category_id": "100",
+                **({"min_sale_price": tramo[0]} if tramo[0] else {}),
+                **({"max_sale_price": tramo[1]} if tramo[1] else {}),
                 "latitude": ORIGEN[0], "longitude": ORIGEN[1], "order_by": "newest",
                 "source": "search_box"},
         headers={"User-Agent": UA, "X-DeviceOS": "0", "Accept": "application/json"},
@@ -233,11 +236,30 @@ def numero(x):
     return float(m.group(0).replace(".", "")) if m else None
 
 
-def autoscout24(paginas=5):
+AS24_MODELOS = ["toyota/land-cruiser", "nissan/patrol", "nissan/terrano", "suzuki/vitara", "suzuki/jimny",
+                "suzuki/samurai", "land-rover/defender", "land-rover/discovery", "land-rover/range-rover",
+                "mitsubishi/montero", "mitsubishi/pajero", "jeep/wrangler", "jeep/cherokee", "isuzu/trooper",
+                "daihatsu/feroza", "lada/niva"]
+
+
+def autoscout24():
+    out, ok = [], 0
+    for ruta in AS24_MODELOS:
+        try:
+            out += _as24(f"https://www.autoscout24.es/lst/{ruta}", {"sort": "age", "desc": 1}, 2)
+            ok += 1
+        except Exception as e:
+            print(f"[AutoScout24] {ruta}: {e}")
+        time.sleep(1.5)
+    if not ok:   # si las páginas por modelo no responden, se recorren los últimos anuncios baratos en general
+        out = _as24("https://www.autoscout24.es/lst", {"priceto": 10000, "sort": "age", "desc": 1}, 5)
+    return out
+
+
+def _as24(url, params, paginas):
     out = []
     for p in range(1, paginas + 1):
-        r = requests.get("https://www.autoscout24.es/lst", headers=HTML_H, timeout=30,
-                         params={"priceto": MAX_PRECIO, "sort": "age", "desc": 1, "page": p})
+        r = requests.get(url, headers=HTML_H, timeout=30, params={**params, "page": p})
         r.raise_for_status()
         m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
         items = (json.loads(m.group(1))["props"]["pageProps"].get("listings") or []) if m else []
@@ -287,7 +309,7 @@ def cochesnet(paginas=3):
     out = []
     for p in range(1, paginas + 1):
         r = requests.get("https://www.coches.net/segunda-mano/", headers=HTML_H, timeout=30,
-                         params={"MaxPrice": MAX_PRECIO, "pg": p})
+                         params={"MaxPrice": 10000, "pg": p})
         r.raise_for_status()
         i = r.text.find("window.__INITIAL_PROPS__ = JSON.parse(")
         if i < 0:
@@ -319,7 +341,6 @@ def cochesnet(paginas=3):
         time.sleep(1.5)
     return out
 
-FUENTES = {"Wallapop": wallapop}          # se consultan una vez por modelo
 LISTADOS = {"AutoScout24": autoscout24, "Coches.net": cochesnet}   # últimos anuncios <= precio, se filtran por modelo
 
 
@@ -399,13 +420,14 @@ def main():
                 conocidos[a["id"]] = a
                 nuevos.append(a)
 
-    tareas = [(n, f, m) for n, f in FUENTES.items() for m in MODELOS] + [(n, f, None) for n, f in LISTADOS.items()]
-    for nombre, fn, modelo in tareas:
+    tareas = [("Wallapop", (lambda m=m, t=t: wallapop(m, t)), f"{m} {t}") for m in MODELOS for t in TRAMOS]
+    tareas += [(n, f, None) for n, f in LISTADOS.items()]
+    for nombre, fn, etiqueta in tareas:
         try:
-            procesar(fn(modelo) if modelo else fn(), nombre)
+            procesar(fn(), nombre)
         except Exception as e:
-            print(f"[{nombre}] fallo{' con ' + repr(modelo) if modelo else ''}: {e}")
-        time.sleep(1.5)
+            print(f"[{nombre}] fallo{' con ' + repr(etiqueta) if etiqueta else ''}: {e}")
+        time.sleep(1.0 if etiqueta else 1.5)
 
     limite = (ahora - timedelta(days=10)).isoformat()
     tope_pub = (ahora - timedelta(days=MAX_DIAS)).isoformat()
