@@ -17,12 +17,23 @@ header{background:var(--musgo);color:#F4F6EF;padding:calc(14px + env(safe-area-i
 @media (prefers-color-scheme:dark){header{background:#22332B}}
 h1{margin:0;font-size:1.35rem;letter-spacing:-.01em}
 .sub{font-size:.85rem;opacity:.85;margin-top:2px}
-nav{display:flex;gap:6px;padding:10px 12px 0;position:sticky;top:0;background:var(--fondo);z-index:2}
+nav{display:flex;gap:6px;padding:10px 12px 0}
 nav button{flex:1;padding:9px 4px;border:1px solid var(--linea);background:transparent;color:var(--tinta);border-radius:8px;font:inherit;font-size:.9rem}
 nav button[aria-pressed=true]{background:var(--musgo);border-color:var(--musgo);color:#F4F6EF}
-.barra{display:flex;gap:8px;padding:10px 12px;align-items:center;font-size:.85rem;color:var(--suave)}
-select,.barra button{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--linea);background:var(--papel);color:var(--tinta)}
-.barra a{margin-left:auto;font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--musgo);background:var(--musgo);color:#F4F6EF;text-decoration:none}
+.buscador{padding:10px 12px 0}
+input,select{font:inherit;color:var(--tinta);background:var(--papel);border:1px solid var(--linea);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
+details{margin-top:8px;background:var(--papel);border:1px solid var(--linea);border-radius:8px}
+summary{padding:9px 12px;cursor:pointer;font-size:.9rem}
+.rejilla{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;padding:4px 12px 12px}
+.rejilla label{display:flex;flex-direction:column;gap:3px;font-size:.78rem;color:var(--suave)}
+.rejilla .ancho{grid-column:1/-1}
+.check{flex-direction:row!important;align-items:center;gap:8px!important;font-size:.85rem!important}
+.check input{width:auto}
+.fila{display:flex;gap:8px;align-items:center;padding:10px 12px;font-size:.85rem;color:var(--suave)}
+.fila label{display:flex;align-items:center;gap:6px}
+.fila select{width:auto}
+.fila a,.fila button{margin-left:auto;font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--musgo);background:var(--musgo);color:#F4F6EF;text-decoration:none;cursor:pointer}
+.fila button.limpio{margin-left:0;background:transparent;color:var(--musgo)}
 main{padding:0 12px 24px;display:grid;gap:10px}
 article{display:grid;grid-template-columns:112px 1fr;background:var(--papel);border:1px solid var(--linea);border-radius:10px;overflow:hidden}
 article.nuevo{border-left:4px solid var(--barro)}
@@ -46,64 +57,129 @@ article.nuevo{border-left:4px solid var(--barro)}
   <button data-t="interesa" aria-pressed="false">Interesan <span></span></button>
   <button data-t="descartado" aria-pressed="false">Descartados <span></span></button>
 </nav>
-<div class="barra">
+<div class="buscador">
+  <input id="q" type="search" placeholder="Buscar en los anuncios (patrol 3.0, diésel, Gijón…)" autocomplete="off">
+  <details id="filtros">
+    <summary>Filtros <span id="nf"></span></summary>
+    <div class="rejilla">
+      <label>Marca<select id="marca"></select></label>
+      <label>Modelo<select id="modelo"></select></label>
+      <label>Web<select id="fuente"></select></label>
+      <label>Km máximos<input id="kmMax" type="number" inputmode="numeric" min="0" step="10000" placeholder="200000"></label>
+      <label>Año desde<input id="anioMin" type="number" inputmode="numeric" placeholder="1995"></label>
+      <label>Año hasta<input id="anioMax" type="number" inputmode="numeric" placeholder="2010"></label>
+      <label>Potencia mínima (CV)<input id="cvMin" type="number" inputmode="numeric" min="0" placeholder="100"></label>
+      <label>Potencia máxima (CV)<input id="cvMax" type="number" inputmode="numeric" min="0" placeholder="200"></label>
+      <label class="ancho check"><input id="sinDato" type="checkbox" checked> Incluir anuncios que no indican ese dato</label>
+    </div>
+  </details>
+</div>
+<div class="fila">
   <label>Ordenar <select id="orden">
     <option value="cerca">Cerca de Asturias</option>
     <option value="nuevo">Más recientes</option>
     <option value="precio">Precio</option>
+    <option value="anio">Año (más nuevo)</option>
+    <option value="km">Menos km</option>
   </select></label>
+  <button class="limpio" id="limpiar" hidden>Limpiar</button>
   <a id="ahora" href="#" target="_blank" rel="noopener">Buscar ahora</a>
 </div>
+<div class="fila" id="cuenta" style="padding-top:0"></div>
 <main id="lista"></main>
 <script>
-const KEY="4x4-estados";
+const KEY="4x4-estados",DIAS=365;
 let estados={};try{estados=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}
 let datos={listings:[],actualizado:null},tab="nuevos";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const sin=s=>String(s??"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
 const hace=iso=>{if(!iso)return"nunca";const m=Math.round((Date.now()-new Date(iso))/6e4);
   return m<2?"ahora mismo":m<60?`hace ${m} min`:m<1440?`hace ${Math.round(m/60)} h`:`hace ${Math.round(m/1440)} d`};
 const guardar=()=>{try{localStorage.setItem(KEY,JSON.stringify(estados))}catch(e){}};
 const estado=a=>estados[a.id]||"nuevos";
+const fechaPub=a=>a.fecha_pub||a.primera_vez;
+const reciente=a=>{const f=fechaPub(a);return !f||(Date.now()-new Date(f))/864e5<=DIAS};
+const IDS=["q","marca","modelo","fuente","kmMax","anioMin","anioMax","cvMin","cvMax"];
 
 async function cargar(){
   try{const r=await fetch("data/listings.json?"+Date.now(),{cache:"no-store"});datos=await r.json();}
   catch(e){$("#sub").textContent="Sin conexión: se muestran los últimos datos guardados";}
-  pintar();
+  poblar();pintar();
+}
+function opciones(sel,valores,todas){
+  const prev=sel.value;
+  sel.innerHTML=`<option value="">${todas}</option>`+valores.map(v=>`<option>${esc(v)}</option>`).join("");
+  if(valores.includes(prev))sel.value=prev;
+}
+function poblar(){
+  const l=datos.listings.filter(reciente);
+  const uniq=f=>[...new Set(l.map(f).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"es"));
+  opciones($("#marca"),uniq(a=>a.marca),"Todas");
+  opciones($("#fuente"),uniq(a=>a.fuente),"Todas");
+  const m=$("#marca").value;
+  opciones($("#modelo"),[...new Set(l.filter(a=>!m||a.marca===m).map(a=>a.modelo).filter(Boolean))].sort(),"Todos");
+}
+function filtros(){
+  const f={};IDS.forEach(i=>f[i]=$("#"+i).value.trim());f.sinDato=$("#sinDato").checked;return f;
+}
+function pasa(a,f){
+  if(f.q&&!(()=>{const t=sin([a.titulo,a.descripcion,a.ciudad,a.marca,a.modelo,a.fuente].join(" "));
+    return sin(f.q).split(/\s+/).every(w=>t.includes(w))})())return false;
+  if(f.marca&&a.marca!==f.marca)return false;
+  if(f.modelo&&a.modelo!==f.modelo)return false;
+  if(f.fuente&&a.fuente!==f.fuente)return false;
+  const ok=(v,fn)=>v==null?f.sinDato:fn(+v);
+  if(f.kmMax&&!ok(a.km,v=>v<=+f.kmMax))return false;
+  if(f.anioMin&&!ok(a.anio,v=>v>=+f.anioMin))return false;
+  if(f.anioMax&&!ok(a.anio,v=>v<=+f.anioMax))return false;
+  if(f.cvMin&&!ok(a.cv,v=>v>=+f.cvMin))return false;
+  if(f.cvMax&&!ok(a.cv,v=>v<=+f.cvMax))return false;
+  return true;
 }
 function pintar(){
-  const l=datos.listings;
-  $("#sub").textContent=datos.actualizado?`Actualizado ${hace(datos.actualizado)} · ${l.length} anuncios`:"Aún no hay anuncios: lanza el rastreo en GitHub";
+  const todos=datos.listings.filter(reciente),f=filtros();
+  const activos=IDS.filter(i=>i!=="q"&&f[i]).length;
+  $("#nf").textContent=activos?`(${activos} activos)`:"";
+  $("#limpiar").hidden=!(activos||f.q);
+  $("#sub").textContent=datos.actualizado?`Actualizado ${hace(datos.actualizado)} · ${todos.length} anuncios de los últimos 12 meses`:"Aún no hay anuncios: lanza el rastreo en GitHub";
+  const vis=todos.filter(a=>pasa(a,f));
   document.querySelectorAll("#tabs button").forEach(b=>{
     b.setAttribute("aria-pressed",b.dataset.t===tab);
-    b.querySelector("span").textContent="("+l.filter(a=>estado(a)===b.dataset.t).length+")";
+    b.querySelector("span").textContent="("+vis.filter(a=>estado(a)===b.dataset.t).length+")";
   });
-  const o=$("#orden").value;
-  const v=l.filter(a=>estado(a)===tab).sort((a,b)=>
+  const o=$("#orden").value,N=9e9;
+  const v=vis.filter(a=>estado(a)===tab).sort((a,b)=>
     o==="precio"?a.precio-b.precio:
-    o==="nuevo"?new Date(b.primera_vez)-new Date(a.primera_vez):
-    (a.dist_km??9e9)-(b.dist_km??9e9));
+    o==="nuevo"?new Date(fechaPub(b))-new Date(fechaPub(a)):
+    o==="anio"?(b.anio??-1)-(a.anio??-1):
+    o==="km"?(a.km??N)-(b.km??N):
+    (a.dist_km??N)-(b.dist_km??N));
+  $("#cuenta").textContent=`${v.length} anuncios`+(vis.length!==todos.length?` (filtrados de ${todos.length})`:"");
   $("#lista").innerHTML=v.length?v.map(a=>{
-    const reciente=Date.now()-new Date(a.primera_vez)<864e5;
-    const km=a.km?a.km.toLocaleString("es-ES")+" km":"km sin indicar";
+    const nuevo=Date.now()-new Date(a.primera_vez)<864e5;
+    const datosVeh=[a.anio,a.km?a.km.toLocaleString("es-ES")+" km":"km sin indicar",a.cv?a.cv+" CV":null].filter(Boolean).join(" · ");
     const d=a.dist_km!=null?` · a ${a.dist_km} km de Oviedo`:"";
-    return `<article class="${reciente&&tab==="nuevos"?"nuevo":""}">
+    return `<article class="${nuevo&&tab==="nuevos"?"nuevo":""}">
       <div class="foto" style="${a.foto?`background-image:url('${esc(a.foto)}')`:""}"></div>
       <div class="cuerpo"><div class="t">${esc(a.titulo)}</div>
       <div class="p">${Math.round(a.precio).toLocaleString("es-ES")} €</div>
-      <div class="m">${km}${d}</div>
-      <div class="m">${esc(a.ciudad)} · ${esc(a.fuente)} · visto ${hace(a.primera_vez)}</div>
+      <div class="m">${datosVeh}</div>
+      <div class="m">${esc(a.ciudad)}${d}</div>
+      <div class="m">${esc(a.fuente)} · publicado ${hace(fechaPub(a))}</div>
       <div class="acc"><a href="${esc(a.url)}" target="_blank" rel="noopener">Ver anuncio</a>
       ${tab!=="interesa"?`<button class="si" data-id="${esc(a.id)}" data-e="interesa">Me interesa</button>`:""}
       ${tab!=="descartado"?`<button class="no" data-id="${esc(a.id)}" data-e="descartado">Descartar</button>`:""}
       ${tab!=="nuevos"?`<button class="no" data-id="${esc(a.id)}" data-e="nuevos">Volver a revisar</button>`:""}
       </div></div></article>`}).join("")
-    :`<div class="vacio">${tab==="nuevos"?"No hay anuncios sin revisar.":"Aquí no hay nada todavía."}</div>`;
+    :`<div class="vacio">${vis.length!==todos.length||f.q?"Ningún anuncio coincide con la búsqueda.":tab==="nuevos"?"No hay anuncios sin revisar.":"Aquí no hay nada todavía."}</div>`;
 }
 $("#lista").addEventListener("click",e=>{const b=e.target.closest("button[data-id]");if(!b)return;
   if(b.dataset.e==="nuevos")delete estados[b.dataset.id];else estados[b.dataset.id]=b.dataset.e;guardar();pintar();});
 $("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b){tab=b.dataset.t;pintar();}});
-$("#orden").addEventListener("change",pintar);
+IDS.concat(["sinDato","orden"]).forEach(i=>$("#"+i).addEventListener(i==="q"||/Min|Max/.test(i)?"input":"change",pintar));
+$("#marca").addEventListener("change",()=>{$("#modelo").value="";poblar();pintar();});
+$("#limpiar").addEventListener("click",()=>{IDS.forEach(i=>$("#"+i).value="");$("#sinDato").checked=true;poblar();pintar();});
 let y0=null;
 addEventListener("touchstart",e=>{y0=scrollY<=0?e.touches[0].clientY:null},{passive:true});
 addEventListener("touchend",e=>{if(y0!==null&&e.changedTouches[0].clientY-y0>90)cargar();y0=null});
