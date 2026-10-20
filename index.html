@@ -22,7 +22,7 @@ nav button{flex:1;padding:9px 4px;border:1px solid var(--linea);background:trans
 nav button[aria-pressed=true]{background:var(--musgo);border-color:var(--musgo);color:#F4F6EF}
 .barra{display:flex;gap:8px;padding:10px 12px;align-items:center;font-size:.85rem;color:var(--suave)}
 select,.barra button{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--linea);background:var(--papel);color:var(--tinta)}
-.barra button{margin-left:auto}
+.barra a{margin-left:auto;font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--musgo);background:var(--musgo);color:#F4F6EF;text-decoration:none}
 main{padding:0 12px 24px;display:grid;gap:10px}
 article{display:grid;grid-template-columns:112px 1fr;background:var(--papel);border:1px solid var(--linea);border-radius:10px;overflow:hidden}
 article.nuevo{border-left:4px solid var(--barro)}
@@ -52,7 +52,7 @@ article.nuevo{border-left:4px solid var(--barro)}
     <option value="nuevo">Más recientes</option>
     <option value="precio">Precio</option>
   </select></label>
-  <button id="recargar">Actualizar</button>
+  <a id="ahora" href="#" target="_blank" rel="noopener">Buscar ahora</a>
 </div>
 <main id="lista"></main>
 <script>
@@ -104,13 +104,13 @@ $("#lista").addEventListener("click",e=>{const b=e.target.closest("button[data-i
   if(b.dataset.e==="nuevos")delete estados[b.dataset.id];else estados[b.dataset.id]=b.dataset.e;guardar();pintar();});
 $("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b){tab=b.dataset.t;pintar();}});
 $("#orden").addEventListener("change",pintar);
-$("#recargar").addEventListener("click",async()=>{
-  const b=$("#recargar");b.disabled=true;b.textContent="Actualizando…";
-  await cargar();b.disabled=false;b.textContent="Actualizado ✓";
-  setTimeout(()=>{b.textContent="Actualizar"},1800);});
 let y0=null;
 addEventListener("touchstart",e=>{y0=scrollY<=0?e.touches[0].clientY:null},{passive:true});
-addEventListener("touchend",e=>{if(y0!==null&&e.changedTouches[0].clientY-y0>90)$("#recargar").click();y0=null});
+addEventListener("touchend",e=>{if(y0!==null&&e.changedTouches[0].clientY-y0>90)cargar();y0=null});
+setInterval(()=>{if(!document.hidden)cargar()},120000);
+{const u=location.hostname.split(".")[0],r=location.pathname.split("/")[1];
+ if(location.hostname.endsWith("github.io")&&r)$("#ahora").href=`https://github.com/${u}/${r}/actions/workflows/buscar.yml`;
+ else $("#ahora").hidden=true;}
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)cargar()});
 if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").then(r=>r.update());
 cargar();
