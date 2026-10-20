@@ -1,4 +1,4 @@
-const C = "4x4-v1";
+const C = "4x4-v2";
 const SHELL = ["./", "index.html", "manifest.json", "icon-192.png"];
 self.addEventListener("install", e => e.waitUntil(caches.open(C).then(c => c.addAll(SHELL))));
 self.addEventListener("activate", e => e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== C).map(x => caches.delete(x))))));
