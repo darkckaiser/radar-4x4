@@ -31,7 +31,7 @@ jobs:
           fin=$((SECONDS + 2700))
           while true; do
             git pull --rebase --autostash -q || true
-            python scraper.py || true
+            timeout 840 python scraper.py || echo "Vuelta interrumpida por tiempo"
             git add data/listings.json
             if ! git diff --staged --quiet; then
               git commit -q -m "Actualiza anuncios"
@@ -42,7 +42,12 @@ jobs:
             sleep 600
           done
       - name: Relanzar el siguiente turno
-        if: ${{ !cancelled() }}
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run buscar.yml --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}"
+        run: |
+          for i in 1 2 3; do
+            gh workflow run buscar.yml --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}" && exit 0
+            sleep 15
+          done
+          exit 1
