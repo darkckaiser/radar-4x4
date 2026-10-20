@@ -7,6 +7,7 @@ import requests
 MAX_PRECIO = 5000
 MIN_PRECIO = 800          # descarta piezas, señales y anuncios trampa
 MAX_KM = 200000
+MAX_DIAS = 365            # se descartan anuncios publicados hace más de un año
 ORIGEN = (43.3614, -5.8494)   # Oviedo
 MODELOS = [
     "land cruiser", "toyota hdj", "toyota kzj", "nissan patrol", "suzuki vitara",
@@ -39,6 +40,65 @@ def extraer_km(texto):
     return int(m.group(1)) if m else None
 
 
+IDENT = [  # patrón en el título -> (marca, modelo); el orden importa
+    (r"land.?cruiser|\bhdj|\bkzj|\bkdj|toyota fj", "Toyota", "Land Cruiser"),
+    (r"patrol", "Nissan", "Patrol"), (r"terrano", "Nissan", "Terrano"),
+    (r"vitara", "Suzuki", "Vitara"), (r"jimny", "Suzuki", "Jimny"), (r"samurai", "Suzuki", "Samurai"),
+    (r"defender", "Land Rover", "Defender"), (r"discovery", "Land Rover", "Discovery"),
+    (r"range rover", "Land Rover", "Range Rover"), (r"land rover", "Land Rover", "Otro"),
+    (r"montero", "Mitsubishi", "Montero"), (r"pajero", "Mitsubishi", "Pajero"),
+    (r"santana", "Santana", "Santana"), (r"wrangler", "Jeep", "Wrangler"), (r"cherokee", "Jeep", "Cherokee"),
+    (r"trooper", "Isuzu", "Trooper"), (r"feroza", "Daihatsu", "Feroza"),
+    (r"\bniva\b", "Lada", "Niva"), (r"\buaz\b", "UAZ", "UAZ"),
+]
+
+
+def identificar(texto):
+    t = (texto or "").lower()
+    for pat, marca, modelo in IDENT:
+        if re.search(pat, t):
+            return marca, modelo
+    return None, None
+
+
+def extraer_anio(titulo, descripcion=""):
+    tope = datetime.now().year + 1
+    for m in re.finditer(r"\b(19[6-9]\d|20[0-3]\d)\b", titulo or ""):
+        if int(m.group(1)) <= tope:
+            return int(m.group(1))
+    m = re.search(r"(?:año|matricul\w*|del)\s*:?\s*(19[6-9]\d|20[0-3]\d)", (descripcion or "").lower())
+    return int(m.group(1)) if m and int(m.group(1)) <= tope else None
+
+
+def extraer_cv(texto):
+    t = (texto or "").lower()
+    m = re.search(r"(\d{2,3})\s?(?:cv|hp|caballos)\b", t)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"(\d{2,3})\s?kw", t)
+    return round(int(m.group(1)) * 1.36) if m else None
+
+
+def a_fecha(x):
+    """Convierte timestamps (s/ms) o textos ISO a ISO UTC; None si no se entiende."""
+    try:
+        if x is None or x == "":
+            return None
+        if isinstance(x, (int, float)) or str(x).isdigit():
+            v = float(x)
+            v = v / 1000 if v > 1e11 else v
+            return datetime.fromtimestamp(v, timezone.utc).isoformat()
+        d = datetime.fromisoformat(str(x).replace("Z", "+00:00"))
+        return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def entero(x):
+    n = numero(x)
+    return int(n) if n else None
+
+
 def wallapop(modelo):
     r = requests.get(
         "https://api.wallapop.com/api/v3/search",
@@ -63,6 +123,8 @@ def wallapop(modelo):
             u = imgs[0].get("urls") or imgs[0]
             foto = u.get("small") or u.get("medium") or u.get("original")
         slug = it.get("web_slug") or it.get("id")
+        ta = it.get("type_attributes") or {}
+        fecha = next((a_fecha(it.get(k)) for k in ("creation_date", "created_at", "publication_date") if it.get(k)), None)
         lat, lon = loc.get("latitude"), loc.get("longitude")
         out.append({
             "id": f"wallapop:{it.get('id')}",
@@ -74,6 +136,9 @@ def wallapop(modelo):
             "dist_km": round(haversine(ORIGEN, (lat, lon))) if lat and lon else None,
             "foto": foto,
             "url": f"https://es.wallapop.com/item/{slug}",
+            "provincia": nombre_provincia(cp=loc.get("postal_code"), nombre=loc.get("region"), lat=lat, lon=lon),
+            "fecha_pub": fecha, "anio": entero(ta.get("year")), "km": entero(ta.get("km")),
+            "cv": entero(ta.get("horsepower") or ta.get("hp")),
             "_modelo": modelo,
         })
     return out
@@ -106,14 +171,51 @@ def sin_acentos(t):
     return "".join(c for c in unicodedata.normalize("NFD", str(t).lower()) if unicodedata.category(c) != "Mn")
 
 
+PROV_NOMBRE = {
+ "01":"Álava","02":"Albacete","03":"Alicante","04":"Almería","05":"Ávila","06":"Badajoz","07":"Baleares","08":"Barcelona",
+ "09":"Burgos","10":"Cáceres","11":"Cádiz","12":"Castellón","13":"Ciudad Real","14":"Córdoba","15":"A Coruña","16":"Cuenca",
+ "17":"Girona","18":"Granada","19":"Guadalajara","20":"Gipuzkoa","21":"Huelva","22":"Huesca","23":"Jaén","24":"León",
+ "25":"Lleida","26":"La Rioja","27":"Lugo","28":"Madrid","29":"Málaga","30":"Murcia","31":"Navarra","32":"Ourense",
+ "33":"Asturias","34":"Palencia","35":"Las Palmas","36":"Pontevedra","37":"Salamanca","38":"Santa Cruz de Tenerife",
+ "39":"Cantabria","40":"Segovia","41":"Sevilla","42":"Soria","43":"Tarragona","44":"Teruel","45":"Toledo","46":"Valencia",
+ "47":"Valladolid","48":"Bizkaia","49":"Zamora","50":"Zaragoza","51":"Ceuta","52":"Melilla",
+}
+ALIAS_PROV = {"vizcaya": "48", "guipuzcoa": "20", "la coruna": "15", "coruna": "15", "alacant": "03", "castello": "12",
+              "illes balears": "07", "islas baleares": "07", "gerona": "17", "lerida": "25", "orense": "32",
+              "oviedo": "33", "principado de asturias": "33", "santander": "39", "navarra/nafarroa": "31",
+              "valencia/valencia": "46", "alicante/alacant": "03", "castellon/castello": "12"}
+
+
+def codigo_provincia(cp=None, nombre=None, lat=None, lon=None):
+    """Código de provincia (01-52): por código postal, por nombre o por la capital más cercana."""
+    if cp and re.match(r"\d{5}", str(cp)) and str(cp)[:2] in PROVINCIAS:
+        return str(cp)[:2]
+    if nombre:
+        n = sin_acentos(nombre).strip()
+        for c, v in PROVINCIAS.items():
+            if v[0] == n:
+                return c
+        if n in ALIAS_PROV:
+            return ALIAS_PROV[n]
+        if len(n) > 3:
+            for c, v in PROVINCIAS.items():
+                if v[0] in n or n in v[0]:
+                    return c
+    if lat and lon:
+        try:
+            return min(PROVINCIAS, key=lambda c: haversine((float(lat), float(lon)), PROVINCIAS[c][1:]))
+        except Exception:
+            pass
+    return None
+
+
+def nombre_provincia(**k):
+    return PROV_NOMBRE.get(codigo_provincia(**k) or "")
+
+
 def dist_provincia(cp=None, nombre=None):
-    reg = None
-    if cp and re.match(r"\d{5}", str(cp)):
-        reg = PROVINCIAS.get(str(cp)[:2])
-    elif nombre:
-        n = sin_acentos(nombre)
-        reg = next((v for v in PROVINCIAS.values() if v[0] in n or n in v[0]), None)
-    return round(haversine(ORIGEN, reg[1:])) if reg else None
+    c = codigo_provincia(cp=cp, nombre=nombre)
+    return round(haversine(ORIGEN, PROVINCIAS[c][1:])) if c else None
 
 
 def numero(x):
@@ -143,17 +245,25 @@ def autoscout24(paginas=5):
             break
         for it in items:
             veh, loc = it.get("vehicle") or {}, it.get("location") or {}
-            km = None
+            km = anio = cv = None
             for d in it.get("vehicleDetails") or []:
-                if "kilomet" in (d.get("ariaLabel") or "").lower():
-                    km = numero(d.get("data"))
+                et, dato = (d.get("ariaLabel") or "").lower(), str(d.get("data") or "")
+                if "kilomet" in et:
+                    km = numero(dato)
+                elif "matricul" in et or "año" in et:
+                    m = re.search(r"(19|20)\d\d", dato)
+                    anio = int(m.group(0)) if m else None
+                elif "potencia" in et:
+                    cv = extraer_cv(dato)
             url = it.get("url") or ""
             url = "https://www.autoscout24.es" + url if url.startswith("/") else url
             titulo = " ".join(x for x in (it.get("title"), veh.get("modelVersionInput")) if x)
             out.append({"id": f"autoscout24:{it.get('id')}", "fuente": "AutoScout24", "titulo": titulo.strip(),
                         "descripcion": "", "precio": numero(it.get("price")), "km": int(km) if km else None,
                         "ciudad": loc.get("city") or "", "dist_km": dist_provincia(cp=loc.get("zip") or loc.get("zipCode")),
-                        "foto": (it.get("images") or [None])[0], "url": url})
+                        "foto": (it.get("images") or [None])[0], "url": url,
+                        "anio": anio, "cv": cv, "fecha_pub": None,
+                        "provincia": nombre_provincia(cp=loc.get("zip") or loc.get("zipCode"), nombre=loc.get("city"))})
         time.sleep(1.5)
     return out
 
@@ -202,7 +312,10 @@ def cochesnet(paginas=3):
                         "titulo": (it.get("title") or "").strip(), "descripcion": "",
                         "precio": numero(it.get("price")), "km": int(km) if km else None,
                         "ciudad": prov if isinstance(prov, str) else "", "dist_km": dist_provincia(nombre=prov) if isinstance(prov, str) else None,
-                        "foto": foto, "url": url})
+                        "foto": foto, "url": url, "anio": entero(it.get("year")),
+                        "provincia": nombre_provincia(nombre=prov) if isinstance(prov, str) else None,
+                        "cv": entero(it.get("hp") or it.get("power") or it.get("horsePower")),
+                        "fecha_pub": next((a_fecha(it.get(k)) for k in ("publishedDate", "publicationDate", "creationDate", "date") if it.get(k)), None)})
         time.sleep(1.5)
     return out
 
@@ -224,7 +337,18 @@ def valido(a):
         return False
     if not a.get("km"):
         a["km"] = extraer_km(texto)
-    return a["km"] is None or a["km"] <= MAX_KM
+    if a["km"] is not None and a["km"] > MAX_KM:
+        return False
+    fp = a.get("fecha_pub")
+    if fp and fp < (datetime.now(timezone.utc) - timedelta(days=MAX_DIAS)).isoformat():
+        return False                         # publicado hace más de un año
+    a["marca"], a["modelo"] = identificar(a["titulo"])
+    if not a["marca"]:
+        a["marca"], a["modelo"] = identificar(a.get("_modelo", ""))
+    a["anio"] = a.get("anio") or extraer_anio(a["titulo"], a.get("descripcion", ""))
+    a["cv"] = a.get("cv") or extraer_cv(texto)
+    a["provincia"] = a.get("provincia") or nombre_provincia(nombre=a.get("ciudad"))
+    return True
 
 
 def telegram(msg):
@@ -264,7 +388,7 @@ def main():
             a.pop("_modelo", None)
             a["ultima_vez"] = ahora.isoformat()
             if a["id"] in conocidos:
-                conocidos[a["id"]].update({k: a[k] for k in ("precio", "ultima_vez", "foto")})
+                conocidos[a["id"]].update({k: v for k, v in a.items() if v is not None and k != "primera_vez"})
             else:
                 a["primera_vez"] = ahora.isoformat()
                 conocidos[a["id"]] = a
@@ -279,8 +403,12 @@ def main():
         time.sleep(1.5)
 
     limite = (ahora - timedelta(days=10)).isoformat()
-    lista = [a for a in conocidos.values() if a["ultima_vez"] >= limite]
+    tope_pub = (ahora - timedelta(days=MAX_DIAS)).isoformat()
+    lista = [a for a in conocidos.values() if a["ultima_vez"] >= limite
+             and (a.get("fecha_pub") or a.get("primera_vez") or "9") >= tope_pub]
     lista.sort(key=lambda a: (a.get("dist_km") is None, a.get("dist_km") or 0))
+    for a in lista:          # completa la provincia de anuncios guardados antes de existir este dato
+        a["provincia"] = a.get("provincia") or nombre_provincia(nombre=a.get("ciudad"))
     os.makedirs("data", exist_ok=True)
     json.dump({"actualizado": ahora.isoformat(), "listings": lista},
               open(DATA, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
