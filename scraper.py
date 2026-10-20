@@ -381,10 +381,15 @@ def main():
     previas = {a["fuente"] for a in prev["listings"]}
     nuevos = []
 
-    def procesar(items):
+    stats = {}
+
+    def procesar(items, nombre):
+        st = stats.setdefault(nombre, {"leidos": 0, "aceptados": 0})
+        st["leidos"] += len(items)
         for a in items:
             if not valido(a):
                 continue
+            st["aceptados"] += 1
             a.pop("_modelo", None)
             a["ultima_vez"] = ahora.isoformat()
             if a["id"] in conocidos:
@@ -397,7 +402,7 @@ def main():
     tareas = [(n, f, m) for n, f in FUENTES.items() for m in MODELOS] + [(n, f, None) for n, f in LISTADOS.items()]
     for nombre, fn, modelo in tareas:
         try:
-            procesar(fn(modelo) if modelo else fn())
+            procesar(fn(modelo) if modelo else fn(), nombre)
         except Exception as e:
             print(f"[{nombre}] fallo{' con ' + repr(modelo) if modelo else ''}: {e}")
         time.sleep(1.5)
@@ -412,6 +417,8 @@ def main():
     os.makedirs("data", exist_ok=True)
     json.dump({"actualizado": ahora.isoformat(), "listings": lista},
               open(DATA, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    for n, st in stats.items():
+        print(f"[{n}] anuncios leídos: {st['leidos']} · válidos tras filtros (precio, km, modelo, fecha): {st['aceptados']}")
     por_fuente = {f: sum(1 for a in lista if a["fuente"] == f) for f in {a["fuente"] for a in lista}}
     print(f"{len(lista)} anuncios ({por_fuente}), {len(nuevos)} nuevos")
 
