@@ -1,0 +1,13 @@
+{
+  "name": "Todoterrenos baratos",
+  "short_name": "4x4 < 5000€",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#E6E8DF",
+  "theme_color": "#2C4A3E",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

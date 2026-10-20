@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Todoterrenos baratos</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2C4A3E">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--fondo:#E6E8DF;--papel:#F7F8F3;--tinta:#18211D;--musgo:#2C4A3E;--barro:#9A5A26;--linea:#C4C8B9;--suave:#5B665F}
+@media (prefers-color-scheme:dark){:root{--fondo:#141A17;--papel:#1D2622;--tinta:#E8EBE2;--musgo:#7FB59C;--barro:#E0A064;--linea:#33403A;--suave:#9AA69E}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--fondo);color:var(--tinta);font:16px/1.4 "Avenir Next","Segoe UI",system-ui,sans-serif;padding-bottom:env(safe-area-inset-bottom)}
+header{background:var(--musgo);color:#F4F6EF;padding:calc(14px + env(safe-area-inset-top)) 16px 12px}
+@media (prefers-color-scheme:dark){header{background:#22332B}}
+h1{margin:0;font-size:1.35rem;letter-spacing:-.01em}
+.sub{font-size:.85rem;opacity:.85;margin-top:2px}
+nav{display:flex;gap:6px;padding:10px 12px 0;position:sticky;top:0;background:var(--fondo);z-index:2}
+nav button{flex:1;padding:9px 4px;border:1px solid var(--linea);background:transparent;color:var(--tinta);border-radius:8px;font:inherit;font-size:.9rem}
+nav button[aria-pressed=true]{background:var(--musgo);border-color:var(--musgo);color:#F4F6EF}
+.barra{display:flex;gap:8px;padding:10px 12px;align-items:center;font-size:.85rem;color:var(--suave)}
+select,.barra button{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--linea);background:var(--papel);color:var(--tinta)}
+.barra button{margin-left:auto}
+main{padding:0 12px 24px;display:grid;gap:10px}
+article{display:grid;grid-template-columns:112px 1fr;background:var(--papel);border:1px solid var(--linea);border-radius:10px;overflow:hidden}
+article.nuevo{border-left:4px solid var(--barro)}
+.foto{background:var(--linea) center/cover;min-height:128px}
+.cuerpo{padding:10px 12px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.t{font-weight:600;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.p{font-size:1.25rem;font-weight:700;color:var(--barro)}
+.m{font-size:.82rem;color:var(--suave)}
+.acc{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.acc a,.acc button{font:inherit;font-size:.85rem;padding:6px 10px;border-radius:8px;border:1px solid var(--musgo);background:transparent;color:var(--musgo);text-decoration:none;cursor:pointer}
+.acc .si{background:var(--musgo);color:#F4F6EF}
+.acc .no{border-color:var(--linea);color:var(--suave)}
+.vacio{text-align:center;color:var(--suave);padding:40px 16px}
+:focus-visible{outline:3px solid var(--barro);outline-offset:2px}
+</style>
+</head>
+<body>
+<header><h1>Todoterrenos hasta 5.000 €</h1><div class="sub" id="sub">Cargando…</div></header>
+<nav id="tabs">
+  <button data-t="nuevos" aria-pressed="true">Sin revisar <span></span></button>
+  <button data-t="interesa" aria-pressed="false">Interesan <span></span></button>
+  <button data-t="descartado" aria-pressed="false">Descartados <span></span></button>
+</nav>
+<div class="barra">
+  <label>Ordenar <select id="orden">
+    <option value="cerca">Cerca de Asturias</option>
+    <option value="nuevo">Más recientes</option>
+    <option value="precio">Precio</option>
+  </select></label>
+  <button id="recargar">Actualizar</button>
+</div>
+<main id="lista"></main>
+<script>
+const KEY="4x4-estados";
+let estados={};try{estados=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}
+let datos={listings:[],actualizado:null},tab="nuevos";
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const hace=iso=>{if(!iso)return"nunca";const m=Math.round((Date.now()-new Date(iso))/6e4);
+  return m<2?"ahora mismo":m<60?`hace ${m} min`:m<1440?`hace ${Math.round(m/60)} h`:`hace ${Math.round(m/1440)} d`};
+const guardar=()=>{try{localStorage.setItem(KEY,JSON.stringify(estados))}catch(e){}};
+const estado=a=>estados[a.id]||"nuevos";
+
+async function cargar(){
+  try{const r=await fetch("data/listings.json?"+Date.now(),{cache:"no-store"});datos=await r.json();}
+  catch(e){$("#sub").textContent="Sin conexión: se muestran los últimos datos guardados";}
+  pintar();
+}
+function pintar(){
+  const l=datos.listings;
+  $("#sub").textContent=datos.actualizado?`Actualizado ${hace(datos.actualizado)} · ${l.length} anuncios`:"Aún no hay anuncios: lanza el rastreo en GitHub";
+  document.querySelectorAll("#tabs button").forEach(b=>{
+    b.setAttribute("aria-pressed",b.dataset.t===tab);
+    b.querySelector("span").textContent="("+l.filter(a=>estado(a)===b.dataset.t).length+")";
+  });
+  const o=$("#orden").value;
+  const v=l.filter(a=>estado(a)===tab).sort((a,b)=>
+    o==="precio"?a.precio-b.precio:
+    o==="nuevo"?new Date(b.primera_vez)-new Date(a.primera_vez):
+    (a.dist_km??9e9)-(b.dist_km??9e9));
+  $("#lista").innerHTML=v.length?v.map(a=>{
+    const reciente=Date.now()-new Date(a.primera_vez)<864e5;
+    const km=a.km?a.km.toLocaleString("es-ES")+" km":"km sin indicar";
+    const d=a.dist_km!=null?` · a ${a.dist_km} km de Oviedo`:"";
+    return `<article class="${reciente&&tab==="nuevos"?"nuevo":""}">
+      <div class="foto" style="${a.foto?`background-image:url('${esc(a.foto)}')`:""}"></div>
+      <div class="cuerpo"><div class="t">${esc(a.titulo)}</div>
+      <div class="p">${Math.round(a.precio).toLocaleString("es-ES")} €</div>
+      <div class="m">${km}${d}</div>
+      <div class="m">${esc(a.ciudad)} · ${esc(a.fuente)} · visto ${hace(a.primera_vez)}</div>
+      <div class="acc"><a href="${esc(a.url)}" target="_blank" rel="noopener">Ver anuncio</a>
+      ${tab!=="interesa"?`<button class="si" data-id="${esc(a.id)}" data-e="interesa">Me interesa</button>`:""}
+      ${tab!=="descartado"?`<button class="no" data-id="${esc(a.id)}" data-e="descartado">Descartar</button>`:""}
+      ${tab!=="nuevos"?`<button class="no" data-id="${esc(a.id)}" data-e="nuevos">Volver a revisar</button>`:""}
+      </div></div></article>`}).join("")
+    :`<div class="vacio">${tab==="nuevos"?"No hay anuncios sin revisar.":"Aquí no hay nada todavía."}</div>`;
+}
+$("#lista").addEventListener("click",e=>{const b=e.target.closest("button[data-id]");if(!b)return;
+  if(b.dataset.e==="nuevos")delete estados[b.dataset.id];else estados[b.dataset.id]=b.dataset.e;guardar();pintar();});
+$("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b){tab=b.dataset.t;pintar();}});
+$("#orden").addEventListener("change",pintar);
+$("#recargar").addEventListener("click",cargar);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)cargar()});
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js");
+cargar();
+</script>
+</body>
+</html>
