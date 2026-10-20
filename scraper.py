@@ -8,6 +8,7 @@ MAX_PRECIO = 300000        # solo descarta precios absurdos (p. ej. 99999999 = '
 TRAMOS = [(0, 2500), (2500, 5000), (5000, 10000), (10000, None)]   # se consulta cada tramo por separado
 MIN_PRECIO = 800          # descarta piezas, señales y anuncios trampa
 MAX_KM = 200000
+PRESUPUESTO_S = 540        # una vuelta nunca dura más de 9 min: guarda lo que lleve y sigue
 MAX_DIAS = 365            # se descartan anuncios publicados hace más de un año
 ORIGEN = (43.3614, -5.8494)   # Oviedo
 MODELOS = [
@@ -118,7 +119,7 @@ def wallapop(modelo, tramo=(None, None)):
                 "latitude": ORIGEN[0], "longitude": ORIGEN[1], "order_by": "newest",
                 "source": "search_box"},
         headers={"User-Agent": UA, "X-DeviceOS": "0", "Accept": "application/json"},
-        timeout=25)
+        timeout=15)
     r.raise_for_status()
     j = r.json()
     items = (j.get("data", {}).get("section", {}).get("payload", {}).get("items")
@@ -269,7 +270,7 @@ def autoscout24():
 def _as24(url, params, paginas):
     out = []
     for p in range(1, paginas + 1):
-        r = requests.get(url, headers=HTML_H, timeout=30, params={**params, "page": p})
+        r = requests.get(url, headers=HTML_H, timeout=20, params={**params, "page": p})
         r.raise_for_status()
         m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
         items = (json.loads(m.group(1))["props"]["pageProps"].get("listings") or []) if m else []
@@ -318,7 +319,7 @@ def _listas(o, ruta="", out=None, prof=0):
 def cochesnet(paginas=3):
     out = []
     for p in range(1, paginas + 1):
-        r = requests.get("https://www.coches.net/segunda-mano/", headers=HTML_H, timeout=30,
+        r = requests.get("https://www.coches.net/segunda-mano/", headers=HTML_H, timeout=20,
                          params={"pg": p})
         r.raise_for_status()
         i = r.text.find("window.__INITIAL_PROPS__ = JSON.parse(")
@@ -434,7 +435,13 @@ def main():
 
     tareas = [("Wallapop", (lambda m=m, t=t: wallapop(m, t)), f"{m} {t}") for m in MODELOS for t in TRAMOS]
     tareas += [(n, f, None) for n, f in LISTADOS.items()]
+    k = int(time.time() // 600) % len(tareas)
+    tareas = tareas[k:] + tareas[:k]
+    inicio = time.time()
     for nombre, fn, etiqueta in tareas:
+        if time.time() - inicio > PRESUPUESTO_S:
+            print(f"Vuelta cortada a los {PRESUPUESTO_S} s (el portal responde lento); se guarda lo recogido.")
+            break
         try:
             procesar(fn(), nombre)
         except Exception as e:
