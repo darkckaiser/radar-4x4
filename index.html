@@ -18,7 +18,12 @@ header{background:var(--musgo);color:#F4F6EF;padding:calc(14px + env(safe-area-i
 h1{margin:0;font-size:1.35rem;letter-spacing:-.01em}
 .sub{font-size:.85rem;opacity:.85;margin-top:2px}
 nav{display:flex;gap:6px;padding:10px 12px 0}
-nav button{flex:1;padding:9px 4px;border:1px solid var(--linea);background:transparent;color:var(--tinta);border-radius:8px;font:inherit;font-size:.9rem}
+#secs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+#secs button{display:flex;flex-direction:column;align-items:center;gap:1px;padding:8px 2px;line-height:1.15;font-size:.8rem}
+#secs button b{font-size:.84rem;white-space:nowrap}
+#secs button small{opacity:.75;font-size:.72rem}
+#secs button[aria-pressed=true]{background:var(--tinta);border-color:var(--tinta);color:var(--fondo)}
+nav button{flex:1;cursor:pointer;padding:9px 4px;border:1px solid var(--linea);background:transparent;color:var(--tinta);border-radius:8px;font:inherit;font-size:.9rem}
 nav button[aria-pressed=true]{background:var(--musgo);border-color:var(--musgo);color:#F4F6EF}
 .buscador{padding:10px 12px 0}
 input,select{font:inherit;color:var(--tinta);background:var(--papel);border:1px solid var(--linea);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
@@ -51,7 +56,8 @@ article.nuevo{border-left:4px solid var(--barro)}
 </style>
 </head>
 <body>
-<header><h1>Todoterrenos hasta 5.000 €</h1><div class="sub" id="sub">Cargando…</div></header>
+<header><h1>Todoterrenos de ocasión</h1><div class="sub" id="sub">Cargando…</div></header>
+<nav id="secs" aria-label="Sección por precio en euros"></nav>
 <nav id="tabs">
   <button data-t="nuevos" aria-pressed="true">Sin revisar <span></span></button>
   <button data-t="interesa" aria-pressed="false">Interesan <span></span></button>
@@ -89,42 +95,55 @@ article.nuevo{border-left:4px solid var(--barro)}
 <div class="fila" id="cuenta" style="padding-top:0"></div>
 <main id="lista"></main>
 <script>
-const KEY="4x4-estados",DIAS=365;
-let estados={};try{estados=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}
-let datos={listings:[],actualizado:null},tab="nuevos";
+const KEY="4x4-estados",UIK="4x4-ui",DIAS=365;
+const SECS=[{n:"< 2.500",min:0,max:2500},{n:"2.500–5.000",min:2500,max:5000},{n:"5.000–10.000",min:5000,max:10000},{n:"> 10.000",min:10000,max:Infinity}];
+const IDS=["q","marca","modelo","fuente","provincia","kmMax","anioMin","anioMax","cvMin","cvMax"];
+const lee=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
+const guarda=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+let estados=lee(KEY,{}),ui=lee(UIK,{sec:0,s:{}}),datos={listings:[],actualizado:null},comprobado=null;
+if(!(ui.sec>=0&&ui.sec<SECS.length))ui.sec=0;
+const cur=()=>ui.s[ui.sec]=ui.s[ui.sec]||{tab:"nuevos",orden:"cerca",f:{}};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const sin=s=>String(s??"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
-const hace=iso=>{if(!iso)return"nunca";const m=Math.round((Date.now()-new Date(iso))/6e4);
+const hace=iso=>{if(!iso)return"nunca";const m=Math.max(0,Math.round((Date.now()-new Date(iso))/6e4));
   return m<2?"ahora mismo":m<60?`hace ${m} min`:m<1440?`hace ${Math.round(m/60)} h`:`hace ${Math.round(m/1440)} d`};
-const guardar=()=>{try{localStorage.setItem(KEY,JSON.stringify(estados))}catch(e){}};
 const estado=a=>estados[a.id]||"nuevos";
 const fechaPub=a=>a.fecha_pub||a.primera_vez;
 const reciente=a=>{const f=fechaPub(a);return !f||(Date.now()-new Date(f))/864e5<=DIAS};
-const IDS=["q","marca","modelo","fuente","provincia","kmMax","anioMin","anioMax","cvMin","cvMax"];
+const enSec=(a,i)=>a.precio>=SECS[i].min&&a.precio<SECS[i].max;
 
+/* ---- datos: se lee directamente del repositorio (sin esperar a que GitHub Pages republique) y de la propia web; se usa el más reciente */
+const gh=location.hostname.endsWith("github.io")&&location.pathname.split("/")[1]?{u:location.hostname.split(".")[0],r:location.pathname.split("/")[1]}:null;
+const traer=async u=>{const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw 0;return r.json()};
 async function cargar(){
-  try{const r=await fetch("data/listings.json?"+Date.now(),{cache:"no-store"});datos=await r.json();}
-  catch(e){$("#sub").textContent="Sin conexión: se muestran los últimos datos guardados";}
+  const t=Date.now(),urls=["data/listings.json?"+t];
+  if(gh)urls.unshift(`https://raw.githubusercontent.com/${gh.u}/${gh.r}/main/data/listings.json?t=${t}`);
+  const ok=(await Promise.allSettled(urls.map(traer))).filter(x=>x.status==="fulfilled").map(x=>x.value);
+  if(ok.length){datos=ok.sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0))[0];comprobado=Date.now();}
   poblar();pintar();
 }
 function opciones(sel,valores,todas){
-  const prev=sel.value;
-  sel.innerHTML=`<option value="">${todas}</option>`+valores.map(v=>`<option>${esc(v)}</option>`).join("");
-  if(valores.includes(prev))sel.value=prev;
+  const prev=sel.value,html=`<option value="">${todas}</option>`+valores.map(v=>`<option>${esc(v)}</option>`).join("");
+  if(sel.innerHTML!==html){sel.innerHTML=html;if(valores.includes(prev))sel.value=prev;}
 }
-function poblar(){
-  const l=datos.listings.filter(reciente);
-  const uniq=f=>[...new Set(l.map(f).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"es"));
-  opciones($("#marca"),uniq(a=>a.marca),"Todas");
-  opciones($("#fuente"),uniq(a=>a.fuente),"Todas");
-  opciones($("#provincia"),uniq(a=>a.provincia),"Todas");
-  const m=$("#marca").value;
-  opciones($("#modelo"),[...new Set(l.filter(a=>!m||a.marca===m).map(a=>a.modelo).filter(Boolean))].sort(),"Todos");
+function poblar(marca=$("#marca").value){
+  const l=datos.listings.filter(a=>reciente(a)&&enSec(a,ui.sec));
+  const uniq=(arr,f)=>[...new Set(arr.map(f).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"es"));
+  opciones($("#marca"),uniq(l,a=>a.marca),"Todas");
+  opciones($("#fuente"),uniq(l,a=>a.fuente),"Todas");
+  opciones($("#provincia"),uniq(l,a=>a.provincia),"Todas");
+  opciones($("#modelo"),uniq(l.filter(a=>!marca||a.marca===marca),a=>a.modelo),"Todos");
 }
-function filtros(){
-  const f={};IDS.forEach(i=>f[i]=$("#"+i).value.trim());f.sinDato=$("#sinDato").checked;return f;
+function cargarInputs(){
+  const c=cur();poblar(c.f.marca||"");
+  IDS.forEach(i=>$("#"+i).value=c.f[i]||"");
+  $("#sinDato").checked=c.f.sinDato!==false;$("#orden").value=c.orden||"cerca";
 }
+function guardarInputs(){
+  const c=cur();IDS.forEach(i=>c.f[i]=$("#"+i).value.trim());c.f.sinDato=$("#sinDato").checked;c.orden=$("#orden").value;guarda(UIK,ui);
+}
+const filtros=()=>{const f={};IDS.forEach(i=>f[i]=$("#"+i).value.trim());f.sinDato=$("#sinDato").checked;return f};
 function pasa(a,f){
   if(f.q&&!(()=>{const t=sin([a.titulo,a.descripcion,a.ciudad,a.provincia,a.marca,a.modelo,a.fuente].join(" "));
     return sin(f.q).split(/\s+/).every(w=>t.includes(w))})())return false;
@@ -140,30 +159,38 @@ function pasa(a,f){
   if(f.cvMax&&!ok(a.cv,v=>v<=+f.cvMax))return false;
   return true;
 }
+function estadoRastreo(){
+  const l=datos.listings.filter(reciente);
+  let t=datos.actualizado?`Rastreo ${hace(datos.actualizado)} · ${l.length} anuncios`:"Aún no hay anuncios: lanza el rastreo en GitHub";
+  if(datos.actualizado&&(Date.now()-new Date(datos.actualizado))/6e4>45)t+=" ⚠ sin actualizar: revisa Actions en GitHub";
+  $("#sub").innerHTML=esc(t)+(comprobado?`<br>Página comprobada ${hace(new Date(comprobado).toISOString())} (se revisa sola cada 2 min)`:"");
+}
 function pintar(){
-  const todos=datos.listings.filter(reciente),f=filtros();
+  const c=cur(),f=filtros(),todos=datos.listings.filter(reciente);
+  $("#secs").innerHTML=SECS.map((s,i)=>`<button data-i="${i}" aria-pressed="${i===ui.sec}"><b>${s.n}</b><small>${todos.filter(a=>enSec(a,i)).length} anunc.</small></button>`).join("");
+  const sec=todos.filter(a=>enSec(a,ui.sec));
   const activos=IDS.filter(i=>i!=="q"&&f[i]).length;
   $("#nf").textContent=activos?`(${activos} activos)`:"";
   $("#limpiar").hidden=!(activos||f.q);
-  $("#sub").textContent=datos.actualizado?`Actualizado ${hace(datos.actualizado)} · ${todos.length} anuncios de los últimos 12 meses`:"Aún no hay anuncios: lanza el rastreo en GitHub";
-  const vis=todos.filter(a=>pasa(a,f));
+  estadoRastreo();
+  const vis=sec.filter(a=>pasa(a,f));
   document.querySelectorAll("#tabs button").forEach(b=>{
-    b.setAttribute("aria-pressed",b.dataset.t===tab);
+    b.setAttribute("aria-pressed",b.dataset.t===c.tab);
     b.querySelector("span").textContent="("+vis.filter(a=>estado(a)===b.dataset.t).length+")";
   });
   const o=$("#orden").value,N=9e9;
-  const v=vis.filter(a=>estado(a)===tab).sort((a,b)=>
+  const v=vis.filter(a=>estado(a)===c.tab).sort((a,b)=>
     o==="precio"?a.precio-b.precio:
     o==="nuevo"?new Date(fechaPub(b))-new Date(fechaPub(a)):
     o==="anio"?(b.anio??-1)-(a.anio??-1):
     o==="km"?(a.km??N)-(b.km??N):
     (a.dist_km??N)-(b.dist_km??N));
-  $("#cuenta").textContent=`${v.length} anuncios`+(vis.length!==todos.length?` (filtrados de ${todos.length})`:"");
+  $("#cuenta").textContent=`${v.length} anuncios`+(vis.length!==sec.length?` (filtrados de ${sec.length})`:"");
   $("#lista").innerHTML=v.length?v.map(a=>{
     const nuevo=Date.now()-new Date(a.primera_vez)<864e5;
     const datosVeh=[a.anio,a.km?a.km.toLocaleString("es-ES")+" km":"km sin indicar",a.cv?a.cv+" CV":null].filter(Boolean).join(" · ");
     const d=a.dist_km!=null?` · a ${a.dist_km} km de Oviedo`:"";
-    return `<article class="${nuevo&&tab==="nuevos"?"nuevo":""}">
+    return `<article class="${nuevo&&c.tab==="nuevos"?"nuevo":""}">
       <div class="foto" style="${a.foto?`background-image:url('${esc(a.foto)}')`:""}"></div>
       <div class="cuerpo"><div class="t">${esc(a.titulo)}</div>
       <div class="p">${Math.round(a.precio).toLocaleString("es-ES")} €</div>
@@ -171,28 +198,32 @@ function pintar(){
       <div class="m">${esc([a.ciudad,a.provincia&&a.provincia!==a.ciudad?a.provincia:""].filter(Boolean).join(", "))}${d}</div>
       <div class="m">${esc(a.fuente)} · publicado ${hace(fechaPub(a))}</div>
       <div class="acc"><a href="${esc(a.url)}" target="_blank" rel="noopener">Ver anuncio</a>
-      ${tab!=="interesa"?`<button class="si" data-id="${esc(a.id)}" data-e="interesa">Me interesa</button>`:""}
-      ${tab!=="descartado"?`<button class="no" data-id="${esc(a.id)}" data-e="descartado">Descartar</button>`:""}
-      ${tab!=="nuevos"?`<button class="no" data-id="${esc(a.id)}" data-e="nuevos">Volver a revisar</button>`:""}
+      ${c.tab!=="interesa"?`<button class="si" data-id="${esc(a.id)}" data-e="interesa">Me interesa</button>`:""}
+      ${c.tab!=="descartado"?`<button class="no" data-id="${esc(a.id)}" data-e="descartado">Descartar</button>`:""}
+      ${c.tab!=="nuevos"?`<button class="no" data-id="${esc(a.id)}" data-e="nuevos">Volver a revisar</button>`:""}
       </div></div></article>`}).join("")
-    :`<div class="vacio">${vis.length!==todos.length||f.q?"Ningún anuncio coincide con la búsqueda.":tab==="nuevos"?"No hay anuncios sin revisar.":"Aquí no hay nada todavía."}</div>`;
+    :`<div class="vacio">${vis.length!==sec.length||f.q?"Ningún anuncio coincide con la búsqueda.":c.tab==="nuevos"?"No hay anuncios sin revisar en esta sección.":"Aquí no hay nada todavía."}</div>`;
 }
+const cambio=()=>{guardarInputs();pintar()};
 $("#lista").addEventListener("click",e=>{const b=e.target.closest("button[data-id]");if(!b)return;
-  if(b.dataset.e==="nuevos")delete estados[b.dataset.id];else estados[b.dataset.id]=b.dataset.e;guardar();pintar();});
-$("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b){tab=b.dataset.t;pintar();}});
-IDS.concat(["sinDato","orden"]).forEach(i=>$("#"+i).addEventListener(i==="q"||/Min|Max/.test(i)?"input":"change",pintar));
-$("#marca").addEventListener("change",()=>{$("#modelo").value="";poblar();pintar();});
-$("#limpiar").addEventListener("click",()=>{IDS.forEach(i=>$("#"+i).value="");$("#sinDato").checked=true;poblar();pintar();});
+  if(b.dataset.e==="nuevos")delete estados[b.dataset.id];else estados[b.dataset.id]=b.dataset.e;guarda(KEY,estados);pintar();});
+$("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b){cur().tab=b.dataset.t;guarda(UIK,ui);pintar();}});
+$("#secs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+  guardarInputs();ui.sec=+b.dataset.i;guarda(UIK,ui);cargarInputs();pintar();scrollTo(0,0);});
+IDS.concat(["sinDato","orden"]).forEach(i=>$("#"+i).addEventListener(i==="q"||/Min|Max/.test(i)?"input":"change",cambio));
+$("#marca").addEventListener("change",()=>{$("#modelo").value="";poblar();cambio();});
+$("#limpiar").addEventListener("click",()=>{IDS.forEach(i=>$("#"+i).value="");$("#sinDato").checked=true;poblar();cambio();});
 let y0=null;
 addEventListener("touchstart",e=>{y0=scrollY<=0?e.touches[0].clientY:null},{passive:true});
 addEventListener("touchend",e=>{if(y0!==null&&e.changedTouches[0].clientY-y0>90)cargar();y0=null});
 setInterval(()=>{if(!document.hidden)cargar()},120000);
+setInterval(()=>{if(!document.hidden)estadoRastreo()},30000);
 {const u=location.hostname.split(".")[0],r=location.pathname.split("/")[1];
  if(location.hostname.endsWith("github.io")&&r)$("#ahora").href=`https://github.com/${u}/${r}/actions/workflows/buscar.yml`;
  else $("#ahora").hidden=true;}
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)cargar()});
 if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").then(r=>r.update());
-cargar();
+cargarInputs();cargar();
 </script>
 </body>
 </html>
