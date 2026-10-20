@@ -104,9 +104,15 @@ $("#lista").addEventListener("click",e=>{const b=e.target.closest("button[data-i
   if(b.dataset.e==="nuevos")delete estados[b.dataset.id];else estados[b.dataset.id]=b.dataset.e;guardar();pintar();});
 $("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b){tab=b.dataset.t;pintar();}});
 $("#orden").addEventListener("change",pintar);
-$("#recargar").addEventListener("click",cargar);
+$("#recargar").addEventListener("click",async()=>{
+  const b=$("#recargar");b.disabled=true;b.textContent="Actualizando…";
+  await cargar();b.disabled=false;b.textContent="Actualizado ✓";
+  setTimeout(()=>{b.textContent="Actualizar"},1800);});
+let y0=null;
+addEventListener("touchstart",e=>{y0=scrollY<=0?e.touches[0].clientY:null},{passive:true});
+addEventListener("touchend",e=>{if(y0!==null&&e.changedTouches[0].clientY-y0>90)$("#recargar").click();y0=null});
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)cargar()});
-if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js");
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").then(r=>r.update());
 cargar();
 </script>
 </body>
