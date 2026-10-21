@@ -8,6 +8,7 @@ MAX_PRECIO = 300000        # solo descarta precios absurdos (p. ej. 99999999 = '
 TRAMOS = [(0, 2500), (2500, 5000), (5000, 10000), (10000, None)]   # se consulta cada tramo por separado
 MIN_PRECIO = 800          # descarta piezas, señales y anuncios trampa
 MAX_KM = 200000
+ALERTA_MAX_PRECIO = 5000   # Telegram solo avisa de novedades por MENOS de este precio (el resto se guarda sin aviso)
 PRESUPUESTO_S = 540        # una vuelta nunca dura más de 9 min: guarda lo que lleve y sigue
 MAX_DIAS = 365            # se descartan anuncios publicados hace más de un año
 ORIGEN = (43.3614, -5.8494)   # Oviedo
@@ -465,18 +466,19 @@ def main():
 
     cerca = lambda a: (a.get("dist_km") is None, a.get("dist_km") or 0)
     nuevos.sort(key=cerca)
+    avisables = [a for a in nuevos if a["precio"] < ALERTA_MAX_PRECIO]
     def etiqueta_tramo(k):
         lo, hi = TRAMOS[k[1]]
         rango = f"< {hi:,}".replace(",", ".") if lo == 0 else (f"> {lo:,}".replace(",", ".") if hi is None else f"{lo:,}–{hi:,}".replace(",", "."))
         return f"{k[0]} ({rango} €)"
 
-    for k in sorted({clave(a) for a in nuevos} - previas):   # combinación portal+precio vista por primera vez: resumen
-        n = [a for a in nuevos if clave(a) == k]
+    for k in sorted({clave(a) for a in avisables} - previas):   # combinación portal+precio vista por primera vez: resumen
+        n = [a for a in avisables if clave(a) == k]
         telegram(f"✅ {etiqueta_tramo(k)}: {len(n)} anuncios guardados. Te muestro los 3 más cercanos; "
                  "a partir de ahora solo aviso de los nuevos.")
         for a in n[:3]:
             telegram(formato(a))
-    avisar = [a for a in nuevos if clave(a) in previas]
+    avisar = [a for a in avisables if clave(a) in previas]
     for a in avisar[:12]:
         telegram(formato(a))
     if len(avisar) > 12:
