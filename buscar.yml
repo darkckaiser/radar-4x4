@@ -1,9 +1,9 @@
 name: Buscar anuncios
 # Cada turno rastrea cada 10 minutos durante ~45 min y al terminar se relanza solo.
-# El reloj horario (cron) es solo una red de seguridad por si la cadena se interrumpe.
+# El reloj (cada 15 min) es una red de seguridad: si la cadena se interrumpe, la reanuda sola.
 on:
   schedule:
-    - cron: "7 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 permissions:
   contents: write
