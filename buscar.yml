@@ -40,7 +40,7 @@ jobs:
               git pull --rebase -q || true
               git push -q || true
             fi
-            espera=$((INTERVALO_MIN * 15 - (SECONDS - t0)))
+            espera=$((INTERVALO_MIN * 60 - (SECONDS - t0)))
             [ "$espera" -lt 0 ] && espera=0
             [ $((SECONDS + espera)) -ge "$fin" ] && { sleep "$espera"; break; }
             sleep "$espera"
